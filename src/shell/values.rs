@@ -1,13 +1,6 @@
-struct RuntimeVal {
-    value_type: ValueType,
-    value: Value
 
-}
-enum ValueType {
-    Boolean,
-    Number
-}
-enum Value {
-    NumberVal(f32),
-    BooleanVal(bool),
+pub enum Value {
+    Float(f32),
+    Boolean(bool),
+    Int(i32),
 }
