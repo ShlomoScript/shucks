@@ -1,6 +1,7 @@
 
 pub enum Value {
-    Float(f32),
+    Number(f64),
+    String(String),
     Boolean(bool),
-    Int(i32),
+    None
 }

@@ -7,7 +7,6 @@ enum TokenType {
     Identifier,
 
     //keywords
-    Var,
     Function,
 
     //grouping operators
@@ -19,6 +18,7 @@ enum TokenType {
     OpenBracket,
     CloseBracket,
     BinaryOperator,
+    UnaryOperator,
     EOF //end of file
 }
 
@@ -42,7 +42,6 @@ fn is_skippable(c: &char) -> bool {
 
 fn make_keywords_map() -> HashMap<String, TokenType> {
     let mut keywords = HashMap::new();
-    keywords.insert(String::from("var"), TokenType::Var);
     keywords.insert(String::from("function"), TokenType::Function);
     keywords
 }
@@ -77,13 +76,23 @@ fn tokenize(source_code: String) -> Vec<Token> {
                 tokens.push(Token::new("}", TokenType::CloseBrace));
                 src.next();
             },
-            '+' | '-' | '*' | '/' | '%' => {
-                tokens.push(Token::new(&current.to_string(), TokenType::BinaryOperator));
+            _ if "+-*/%<>=!&|".contains(*current) => {
+                let mut op = String::new();
+                op.push(*current);
                 src.next();
-            },
-            '=' => {
-                tokens.push(Token::new("=", TokenType::Equals));
-                src.next();
+                if let Some(next) = src.peek() {
+                    if "=&|".contains(*next) {
+                        op.push(*next);
+                        src.next();
+                    }
+                }
+                match op.as_str() {
+                    "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "!=" | "==" | "|" | "&&" | "||" => {
+                        tokens.push(Token::new(&op, TokenType::BinaryOperator));
+                    },
+                    "=" => {tokens.push(Token::new(&op, TokenType::Equals))}
+                    _ => panic!("unknown operator")
+                }
             },
             _ if current.is_digit(10) => {
                 let mut num = String::new();
