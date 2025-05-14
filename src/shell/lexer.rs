@@ -19,6 +19,7 @@ pub enum TokenType {
     OpenBracket,
     CloseBracket,
     Operator,
+    Comma,
     EOF //end of file
 }
 
@@ -83,6 +84,10 @@ pub fn tokenize(source_code: String) -> Vec<Token> {
                 tokens.push(Token::new("}", TokenType::CloseBrace));
                 src.next();
             },
+            ',' => {
+                tokens.push(Token::new(",", TokenType::Comma));
+                src.next();
+            }
             _ if "+-*/%<>=!&|".contains(*current) => {
                 let mut op = String::new();
                 op.push(*current);
@@ -97,7 +102,7 @@ pub fn tokenize(source_code: String) -> Vec<Token> {
                     "+" | "-" | "*" | "/" | "%" | "!" | "<" | ">" | "<=" | ">=" | "!=" | "==" | "|" | "&&" | "||" => {
                         tokens.push(Token::new(&op, TokenType::Operator));
                     },
-                    "=" => {tokens.push(Token::new(&op, TokenType::Equals))}
+                    "=" => {tokens.push(Token::new(&op, TokenType::Equals));}
                     _ => panic!("unknown operator")
                 }
             },
