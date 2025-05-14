@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 
-#[derive(Clone)]
-enum TokenType {
+#[derive(Clone, PartialEq, Debug)]
+pub enum TokenType {
     //literal types
     Number,
+    String,
     Identifier,
 
     //keywords
-    Function,
+    Function,// only one so far, will add more later
 
     //grouping operators
     Equals,
@@ -17,12 +18,12 @@ enum TokenType {
     CloseBrace,
     OpenBracket,
     CloseBracket,
-    BinaryOperator,
-    UnaryOperator,
+    Operator,
     EOF //end of file
 }
 
-struct Token {
+#[derive(Clone, Debug)]
+pub struct Token {
     token_value: String,
     token_type: TokenType
 }
@@ -33,6 +34,12 @@ impl Token {
             token_value: token_value.to_string(),
             token_type,
         }
+    }
+    pub fn token_type(&self) -> &TokenType {
+        &self.token_type
+    }
+    pub fn value(&self) -> &String {
+        &self.token_value
     }
 }
 
@@ -46,7 +53,7 @@ fn make_keywords_map() -> HashMap<String, TokenType> {
     keywords
 }
 
-fn tokenize(source_code: String) -> Vec<Token> {
+pub fn tokenize(source_code: String) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
     let mut src = source_code.chars().peekable();
     let keywords = make_keywords_map();
@@ -87,12 +94,26 @@ fn tokenize(source_code: String) -> Vec<Token> {
                     }
                 }
                 match op.as_str() {
-                    "+" | "-" | "*" | "/" | "%" | "<" | ">" | "<=" | ">=" | "!=" | "==" | "|" | "&&" | "||" => {
-                        tokens.push(Token::new(&op, TokenType::BinaryOperator));
+                    "+" | "-" | "*" | "/" | "%" | "!" | "<" | ">" | "<=" | ">=" | "!=" | "==" | "|" | "&&" | "||" => {
+                        tokens.push(Token::new(&op, TokenType::Operator));
                     },
                     "=" => {tokens.push(Token::new(&op, TokenType::Equals))}
                     _ => panic!("unknown operator")
                 }
+            },
+            '"' => {
+                let mut string = String::new();
+                while let Some(next) = src.peek() {
+                    if *next != '"' {
+                        string.push(*next);
+                        src.next();
+                    } else {
+                        string.push(*next);
+                        src.next();
+                        break;
+                    }
+                }
+                tokens.push(Token::new(&string, TokenType::String));
             },
             _ if current.is_digit(10) => {
                 let mut num = String::new();
@@ -118,8 +139,10 @@ fn tokenize(source_code: String) -> Vec<Token> {
                 }
                 if let Some(token_type) = keywords.get(&ident) {
                     tokens.push(Token::new(&ident, token_type.clone()));
+                } else if ident == "and".to_string() || ident == "or".to_string() || ident == "not".to_string() {
+                    tokens.push(Token::new(&ident, TokenType::Operator));
                 } else {
-                    tokens.push(Token::new(&ident, TokenType::Identifier))
+                    tokens.push(Token::new(&ident, TokenType::Identifier));
                 }
             },
             _ if is_skippable(current) => {src.next();}

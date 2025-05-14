@@ -1,5 +1,6 @@
 use super::values::Value;
 
+#[derive(Debug)]
 pub enum Expr {
     Literal(Value),
     Identifier(String),
@@ -50,7 +51,7 @@ pub enum Expr {
     Return(Box<Expr>)
 }
 
-
+#[derive(Debug)]
 pub enum BinaryOp {
     Add,
     Sub,
@@ -67,11 +68,13 @@ pub enum BinaryOp {
     Or
 }
 
+#[derive(Debug)]
 pub enum UnaryOp {
     Neg,
     Not
 }
 
+#[derive(Debug)]
 pub struct Ast {
-    expr: Expr
+    pub expr: Expr
 }
