@@ -5,17 +5,39 @@ struct LocalEnv {
     frames: Vec<Frame>
 }
 
-struct GobalEnv {
+struct GlobalEnv {
     variables: HashMap<String, Value>,
     //functions: HashMap<String, Function>,
 }
 
-struct ShellEnv {
-    globals: GobalEnv,
+pub struct ShellEnv {
+    globals: GlobalEnv,
     locals: LocalEnv
 }
 
 struct Frame {
     name: Option<String>,
     vars: HashMap<String, Value>
+}
+impl ShellEnv {
+    pub fn new() -> Self {
+        ShellEnv {
+            globals: GlobalEnv::new(),
+            locals: LocalEnv::new()
+        }
+    }
+}
+impl GlobalEnv {
+    pub fn new() -> Self {
+        GlobalEnv {
+            variables: HashMap::new()
+        }
+    }
+}
+impl LocalEnv {
+    pub fn new() -> Self {
+        LocalEnv {
+            frames: Vec::new()
+        }
+    }
 }
