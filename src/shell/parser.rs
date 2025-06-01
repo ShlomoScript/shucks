@@ -1,51 +1,57 @@
-use super::lexer::{tokenize, Token, TokenType};
-use super::ast::{Ast, Expr, BinaryOp, UnaryOp};
+use super::ast::{Ast, BinaryOp, Expr, UnaryOp};
+use super::lexer::{Bool, Token, tokenize};
 use super::values::Value;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Precedence {
-    Lowest,
-    Assignment,
-    LogicalOr,
-    LogicalAnd,
-    Equality,
-    Comparison,
-    Term,
-    Factor,
-    Unary,
-    Call,
-    Primary
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Precedence {
+    Lowest,      // e.g., for `if`, `while`, etc. (special forms)
+    OrElse,      // ||
+    AndThen,     // &&
+    Assignment,  // =
+    Pipe,        // |
+    Redirect,    // ->, >>, <-
+    Or,          // or
+    And,         // and
+    Equality,    // ==, !=
+    Comparison,  // <, <=, >, >=
+    Term,        // +, -
+    Factor,      // *, /, %
+    Unary,       // !, - (prefix)
+    CallOrIndex, // function calls, array indexing: f(x), x[0]
+    Primary,     // literals, identifiers, (grouped), blocks
 }
 impl Precedence {
     pub fn next_higher(self) -> Precedence {
+        use Precedence::*;
         match self {
-            Precedence::Lowest => Precedence::Assignment,
-            Precedence::Assignment => Precedence::LogicalOr,
-            Precedence::LogicalOr => Precedence::LogicalAnd,
-            Precedence::LogicalAnd => Precedence::Equality,
-            Precedence::Equality => Precedence::Comparison,
-            Precedence::Comparison => Precedence::Term,
-            Precedence::Term => Precedence::Factor,
-            Precedence::Factor => Precedence::Unary,
-            Precedence::Unary => Precedence::Call,
-            Precedence::Call => Precedence::Primary,
-            Precedence::Primary => Precedence::Primary,
+            Lowest => OrElse,
+            OrElse => AndThen,
+            AndThen => Assignment,
+            Assignment => Pipe,
+            Pipe => Redirect,
+            Redirect => Or,
+            Or => And,
+            And => Equality,
+            Equality => Comparison,
+            Comparison => Term,
+            Term => Factor,
+            Factor => Unary,
+            Unary => CallOrIndex,
+            CallOrIndex => Primary,
+            Primary => Primary,
         }
     }
 }
 
 pub struct Parser {
     tokens: Vec<Token>,
-    current: usize
+    current: usize,
 }
 
 impl Parser {
     pub fn new(source_code: String) -> Self {
-        let tokens = tokenize(source_code);
-        Parser {tokens, current: 0}
-    }
-    fn not_eof(&self) -> bool {
-        self.current < self.tokens.len() && *self.tokens[self.current].token_type() != TokenType::EOF
+        let tokens = tokenize(&source_code).unwrap();
+        Parser { tokens, current: 0 }
     }
     fn at(&self) -> &Token {
         &self.tokens[self.current]
@@ -54,178 +60,194 @@ impl Parser {
         self.current += 1;
         &self.tokens[self.current - 1]
     }
-    fn expect(&mut self, token_type: TokenType, err: &str) -> &Token {
+    fn expect(&mut self, token: Token, err: &str) -> &Token {
         self.current += 1;
         let prev = &self.tokens[self.current - 1];
-        if prev.value() == "" || *prev.token_type() != token_type {
-            panic!("Parser Error:\n{}\nExpected: {:?}\nFound: {:?}", err, token_type, prev)
+        if *prev != token {
+            panic!(
+                "Parser Error:\n{}\nExpected: {:?}\nFound: {:?}",
+                err, token, prev
+            )
         }
         prev
     }
-    fn check(&self, expected: TokenType) -> bool {
-        self.current < self.tokens.len() && *self.tokens[self.current].token_type() == expected
+    fn check(&self, expected: Token) -> bool {
+        self.current < self.tokens.len() && self.tokens[self.current] == expected
     }
     pub fn produce_ast(&mut self) -> Ast {
-        Ast {expr: self.parse_expression(Precedence::Lowest)}
+        Ast {
+            expr: self.parse_expression(Precedence::Lowest),
+        }
     }
     fn parse_expression(&mut self, precedence: Precedence) -> Expr {
         let mut left = self.nud();
 
-        while precedence < self.get_precedence() || precedence == Precedence::Call {
+        while precedence < self.get_precedence() || precedence == Precedence::CallOrIndex {
             left = self.led(left);
         }
         left
     }
     fn nud(&mut self) -> Expr {
-        match self.at().token_type() {
-            TokenType::Number => {
-                let value = self.at().value().parse().unwrap();
+        match self.at().clone() {
+            Token::Number(x) => {
                 self.eat();
-                Expr::Literal(Value::Number(value))
-            },
-            TokenType::String => {
-                let value = self.at().value().clone();//.parse().unwrap();
+                Expr::Literal(Value::Number(x.to_owned()))
+            }
+            Token::String(x) => {
                 self.eat();
-                Expr::Literal(Value::String(value))
-            },
-            TokenType::Identifier => {
-                let val = self.at().value().clone();
+                Expr::Literal(Value::String(x.to_string()))
+            }
+            Token::Bool(x) => {
                 self.eat();
-                Expr::Identifier(val)
-            },
-            TokenType::Function => todo!(),
-            TokenType::OpenParen => {
+                Expr::Literal(Value::Boolean(match x {
+                    Bool::True => true,
+                    Bool::False => false,
+                }))
+            }
+            Token::Identifier(x) => {
+                self.eat();
+                Expr::Identifier(x.to_string())
+            }
+            Token::Function => todo!(),
+            Token::If => todo!(),
+            Token::While => todo!(),
+            Token::For => todo!(),
+            Token::OpenParen => {
                 self.eat();
                 let expr = self.parse_expression(Precedence::Lowest);
-                self.expect(TokenType::CloseParen, "Expected ')' after expression");
+                self.expect(Token::CloseParen, "Expected ')' after expression");
                 expr
-            },
-            TokenType::OpenBrace => todo!(),
-            TokenType::OpenBracket => todo!(),
-            TokenType::Operator if self.at().value().as_str() == "!" || self.at().value().as_str() == "-" || self.at().value().as_str() == "not" => {
-                let op = self.at().clone();
+            }
+            Token::OpenBrace => todo!(),
+            Token::OpenBracket => todo!(),
+            Token::Not => {
                 self.eat();
                 let right = self.parse_expression(Precedence::Unary);
                 Expr::UnaryOp {
-                    op: match op.value().as_str() {
-                        "!" | "not"=> UnaryOp::Not,
-                        "-" => UnaryOp::Neg,
-                        _ => panic!("It's litteraly impossible for this message to be shown because of the match guard earlier.")
-                    },
-                    expr: Box::new(right)
+                    op: UnaryOp::Not,
+                    expr: Box::new(right),
                 }
-            },
-            _ => panic!("Unexpected token in nud: {:?}", self.at())
+            }
+            _ => panic!("Unexpected token in nud: {:?}", self.at()),
         }
     }
     fn led(&mut self, left: Expr) -> Expr {
+        macro_rules! return_op {
+            ($x:expr) => {{
+                let prec = self.get_precedence();
+                self.eat();
+                let right = self.parse_expression(prec.next_higher());
+                Expr::BinaryOp {
+                    left: Box::new(left),
+                    op: $x,
+                    right: Box::new(right),
+                }
+            }};
+        }
         let token = self.at().clone();
-        match token.token_type() {
-            TokenType::Operator if token.value() != "!" && token.value() != "not" => {
-                        let prec = self.get_precedence();
-                        self.eat();
-                        let right = self.parse_expression(prec.next_higher());
-                        match token.value().as_str() {
-                            "&&" => {
-                                return Expr::AndThen {
-                                    left: Box::new(left),
-                                    right: Box::new(right)
-                                }
-                            },
-                            "||" => {
-                                return Expr::OrElse {
-                                    left: Box::new(left),
-                                    right: Box::new(right)
-                                }
-                            },
-                            _ => {
-                                return Expr::BinaryOp {
-                                    left: Box::new(left),
-                                    op: match token.value().as_str() {
-                                        "+" => BinaryOp::Add,
-                                        "-" => BinaryOp::Sub,
-                                        "*" => BinaryOp::Mul,
-                                        "/" => BinaryOp::Div,
-                                        "%" => BinaryOp::Mod,
-                                        "==" => BinaryOp::Eq,
-                                        "!=" => BinaryOp::Neq,
-                                        "<" => BinaryOp::Lt,
-                                        "<=" => BinaryOp::Le,
-                                        ">" => BinaryOp::Gt,
-                                        ">=" => BinaryOp::Ge,
-                                        "and" => BinaryOp::And,
-                                        "or" => BinaryOp::Or,
-                                        _ => panic!("If you're seeing this, run")
-                                    },
-                                    right: Box::new(right)
-                                };
-                            }
-                        }
-                
-                    },
-            TokenType::Equals => {
+        match token {
+            Token::AndThen => {
+                let prec = self.get_precedence();
+                self.eat();
+                let right = self.parse_expression(prec.next_higher());
+                Expr::AndThen {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
+            Token::OrElse => {
+                let prec = self.get_precedence();
+                self.eat();
+                let right = self.parse_expression(prec.next_higher());
+                Expr::OrElse {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            }
+            Token::Add => return_op!(BinaryOp::Add),
+            Token::Sub => return_op!(BinaryOp::Sub),
+            Token::Mul => return_op!(BinaryOp::Mul),
+            Token::Div => return_op!(BinaryOp::Div),
+            Token::Mod => return_op!(BinaryOp::Mod),
+            Token::EqualTo => return_op!(BinaryOp::Eq),
+            Token::NotEqualTo => return_op!(BinaryOp::Neq),
+            Token::LessThan => return_op!(BinaryOp::Lt),
+            Token::GreaterThan => return_op!(BinaryOp::Gt),
+            Token::LessThanEqual => return_op!(BinaryOp::Le),
+            Token::GreaterThanEqual => return_op!(BinaryOp::Ge),
+            Token::And => return_op!(BinaryOp::And),
+            Token::Or => return_op!(BinaryOp::Or),
+            Token::Equals => {
                 if let Expr::Identifier(name) = left {
                     self.eat();
                     let value = self.parse_expression(Precedence::Lowest);
-                    return Expr::Assign {
+                    Expr::Assign {
                         name,
-                        value: Box::new(value)
+                        value: Box::new(value),
                     }
                 } else {
                     panic!("Invalid assignment target")
                 }
-            },
-            TokenType::OpenParen => {
-                        self.eat();
-                        let mut args = Vec::new();
-                        if *self.at().token_type() != TokenType::CloseParen {
-                            loop {
-                                args.push(self.parse_expression(Precedence::Lowest));
-                                match self.at().token_type() {
-                                    TokenType::Comma => {self.eat();},
-                                    TokenType::CloseParen => break,
-                                    other => panic!("Unexpected token {:?} in argument list", other)
-                                }
+            }
+            Token::OpenParen => {
+                self.eat();
+                let mut args = Vec::new();
+                if *self.at() != Token::CloseParen {
+                    loop {
+                        args.push(self.parse_expression(Precedence::Lowest));
+                        match self.at() {
+                            Token::Comma => {
+                                self.eat();
                             }
+                            Token::CloseParen => break,
+                            other => panic!("Unexpected token {:?} in argument list", other),
                         }
-                        self.expect(TokenType::CloseParen, "Expected ')' after function arguments.");
-                        Expr::Call {
-                            callee: Box::new(left),
-                            args
-                        }
-                    },
-            TokenType::Number => todo!(),
-            TokenType::String => todo!(),
-            TokenType::Identifier => todo!(),
-            TokenType::Function => todo!(),
-            TokenType::CloseParen => todo!(),
-            TokenType::OpenBrace => todo!(),
-            TokenType::CloseBrace => todo!(),
-            TokenType::OpenBracket => todo!(),
-            TokenType::CloseBracket => todo!(),
-            TokenType::Comma => todo!(),
-            TokenType::EOF => todo!(),
-            _ => panic!("Unexpected token in led: {:?}", self.at())
+                    }
+                }
+                self.expect(Token::CloseParen, "Expected ')' after function arguments.");
+                Expr::Call {
+                    callee: Box::new(left),
+                    args,
+                }
+            }
+            Token::Number(_) => todo!(),
+            Token::String(_) => todo!(),
+            Token::Identifier(_) => todo!(),
+            Token::OpenBracket => todo!(), // indexing
+            Token::Comma => todo!(),
+            _ => panic!("Unexpected token in led: {:?}", self.at()),
         }
     }
     fn get_precedence(&self) -> Precedence {
         self.get_token_precedence(self.at())
     }
     fn get_token_precedence(&self, token: &Token) -> Precedence {
-        match token.token_type() {
-            TokenType::Operator => match token.value().as_str() {
-                "||" => Precedence::LogicalOr,
-                "&&" => Precedence::LogicalAnd,
-                "==" | "!=" => Precedence::Equality,
-                "<" | "<=" | ">" | ">=" => Precedence::Comparison,
-                "+" | "-" => Precedence::Term,
-                "*" | "/" | "%" => Precedence::Factor,
-                _ => Precedence::Lowest
-            }
-            TokenType::Equals => Precedence::Assignment,
-            TokenType::OpenParen => Precedence::Call,
-            _ => Precedence::Lowest
+        use Precedence::*;
+        match token {
+            Token::OrElse => OrElse,
+            Token::AndThen => AndThen,
+
+            Token::Equals => Assignment,
+            Token::Pipe => Pipe,
+
+            Token::RedirectIn | Token::RedirectOut | Token::RedirectOutAppend => Redirect,
+
+            Token::Or => Or,
+            Token::And => And,
+
+            Token::EqualTo | Token::NotEqualTo => Equality,
+
+            Token::GreaterThan
+            | Token::GreaterThanEqual
+            | Token::LessThan
+            | Token::LessThanEqual => Comparison,
+
+            Token::Add | Token::Sub => Term,
+            Token::Mul | Token::Div | Token::Mod => Factor,
+
+            Token::OpenParen | Token::OpenBracket => CallOrIndex,
+
+            _ => Lowest,
         }
-        
     }
 }

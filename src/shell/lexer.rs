@@ -1,162 +1,146 @@
-use std::collections::HashMap;
+use std::error::Error;
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum TokenType {
-    //literal types
-    Number,
-    String,
-    Identifier,
+use regex::Regex;
 
-    //keywords
-    Function,// only one so far, will add more later
-
-    //grouping operators
-    Equals,
-    OpenParen,
-    CloseParen,
-    OpenBrace,
-    CloseBrace,
-    OpenBracket,
-    CloseBracket,
-    Operator,
-    Comma,
-    EOF //end of file
+#[derive(Clone, Debug, PartialEq)]
+pub enum Bool {
+    True,
+    False,
 }
 
-#[derive(Clone, Debug)]
-pub struct Token {
-    token_value: String,
-    token_type: TokenType
-}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Token {
+    // literal types
+    Number(f64),
+    Bool(Bool),
+    String(String),
+    Identifier(String),
 
-impl Token {
-    pub fn new(token_value: &str, token_type: TokenType) -> Self {
-        Token {
-            token_value: token_value.to_string(),
-            token_type,
-        }
-    }
-    pub fn token_type(&self) -> &TokenType {
-        &self.token_type
-    }
-    pub fn value(&self) -> &String {
-        &self.token_value
-    }
-}
+    // keywords
+    If,
+    While,
+    Function,
+    For,
 
-fn is_skippable(c: &char) -> bool {
-    *c == ' ' || *c == '\n' || *c == '\t'
-}
+    // grouping operators
+    Equals,            // =
+    OpenParen,         // (
+    CloseParen,        // )
+    OpenBrace,         // {
+    CloseBrace,        // }
+    OpenBracket,       // [
+    CloseBracket,      // ]
+    Add,               // +
+    Sub,               // -
+    Mul,               // *
+    Div,               // /
+    Mod,               // %
+    And,               // and
+    Or,                // or
+    AndThen,           // &&
+    OrElse,            // ||
+    Pipe,              // |
+    RedirectIn,        // <-
+    RedirectOut,       // ->
+    RedirectOutAppend, // >>
+    GreaterThan,       // >
+    GreaterThanEqual,  // >=
+    LessThan,          // <
+    LessThanEqual,     // <=
+    EqualTo,           // ==
+    NotEqualTo,        // !=
 
-fn make_keywords_map() -> HashMap<String, TokenType> {
-    let mut keywords = HashMap::new();
-    keywords.insert(String::from("function"), TokenType::Function);
-    keywords
-}
+    // unary
+    Not, // not / !
 
-pub fn tokenize(source_code: String) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::new();
+    // other
+    Comma,   // ,
+    Newline, // \n
+    Eof,     // end of file
+}
+pub fn tokenize(source_code: &str) -> Result<Vec<Token>, Box<dyn Error>> {
+    let mut tokens = Vec::new();
     let mut src = source_code.chars().peekable();
-    let keywords = make_keywords_map();
+    macro_rules! push_next {
+        ($x:expr) => {{
+            tokens.push($x);
+            src.next();
+        }};
+    }
+    let re = Regex::new(r"^-?\d+(\.\d+)?$").unwrap();
     while let Some(current) = src.peek() {
         match current {
-            '(' => {
-                tokens.push(Token::new("(", TokenType::OpenParen));
-                src.next();
-            },
-            ')' => {
-                tokens.push(Token::new(")", TokenType::CloseParen));
-                src.next();
-            },
-            '[' => {
-                tokens.push(Token::new("[", TokenType::OpenBracket));
-                src.next();
-            },
-            ']' => {
-                tokens.push(Token::new("]", TokenType::CloseBracket));
-                src.next();
-            },
-            '{' => {
-                tokens.push(Token::new("{", TokenType::OpenBrace));
-                src.next();
-            },
-            '}' => {
-                tokens.push(Token::new("}", TokenType::CloseBrace));
-                src.next();
-            },
-            ',' => {
-                tokens.push(Token::new(",", TokenType::Comma));
+            '(' => push_next!(Token::OpenParen),
+            ')' => push_next!(Token::CloseParen),
+            '[' => push_next!(Token::OpenBracket),
+            ']' => push_next!(Token::CloseBracket),
+            '{' => push_next!(Token::OpenBrace),
+            '}' => push_next!(Token::CloseBrace),
+            ',' => push_next!(Token::Comma),
+            '!' => push_next!(Token::Not),
+            ' ' | '\t' => {
                 src.next();
             }
-            _ if "+-*/%<>=!&|".contains(*current) => {
-                let mut op = String::new();
-                op.push(*current);
-                src.next();
-                if let Some(next) = src.peek() {
-                    if "=&|".contains(*next) {
-                        op.push(*next);
-                        src.next();
-                    }
-                }
-                match op.as_str() {
-                    "+" | "-" | "*" | "/" | "%" | "!" | "<" | ">" | "<=" | ">=" | "!=" | "==" | "|" | "&&" | "||" => {
-                        tokens.push(Token::new(&op, TokenType::Operator));
-                    },
-                    "=" => {tokens.push(Token::new(&op, TokenType::Equals));}
-                    _ => panic!("unknown operator")
-                }
-            },
+            '\n' => push_next!(Token::Newline),
             '"' => {
                 let mut string = String::new();
+                src.next();
                 while let Some(next) = src.peek() {
                     if *next != '"' {
                         string.push(*next);
                         src.next();
                     } else {
-                        string.push(*next);
                         src.next();
                         break;
                     }
                 }
-                tokens.push(Token::new(&string, TokenType::String));
-            },
-            _ if current.is_digit(10) => {
-                let mut num = String::new();
-                while let Some(next) = src.peek() {
-                    if next.is_digit(10) {
-                        num.push(*next);
-                        src.next();
-                    } else {
-                        break;
-                    }
-                }
-                tokens.push(Token::new(&num, TokenType::Number));
-            },
-            _ if current.is_alphabetic() => {
-                let mut ident = String::new();
-                while let Some(next) = src.peek() {
-                    if next.is_alphabetic() {
-                        ident.push(*next);
-                        src.next();
-                    } else {
-                        break;
-                    }
-                }
-                if let Some(token_type) = keywords.get(&ident) {
-                    tokens.push(Token::new(&ident, token_type.clone()));
-                } else if ident == "and".to_string() || ident == "or".to_string() || ident == "not".to_string() {
-                    tokens.push(Token::new(&ident, TokenType::Operator));
-                } else {
-                    tokens.push(Token::new(&ident, TokenType::Identifier));
-                }
-            },
-            _ if is_skippable(current) => {src.next();}
-            x => {
-                println!("Unrecognized character found: {}", x);
-                std::process::exit(1);
+                tokens.push(Token::String(string));
             }
+            _ if current.is_alphanumeric() || "+-*/%=<>&|!".contains(*current) => {
+                let mut word = String::new();
+                while let Some(next) = src.peek() {
+                    if "+-*/%=<>&|!".contains(*next) || next.is_alphanumeric() {
+                        word.push(*next);
+                        src.next();
+                    } else {
+                        break;
+                    }
+                }
+                match word.as_str() {
+                    "+" => tokens.push(Token::Add),
+                    "-" => tokens.push(Token::Sub),
+                    "*" => tokens.push(Token::Mul),
+                    "/" => tokens.push(Token::Div),
+                    "%" => tokens.push(Token::Mod),
+                    "=" => tokens.push(Token::Equals),
+                    "|" => tokens.push(Token::Pipe),
+                    "||" => tokens.push(Token::OrElse),
+                    "&&" => tokens.push(Token::AndThen),
+                    ">" => tokens.push(Token::GreaterThan),
+                    "<" => tokens.push(Token::LessThan),
+                    ">=" => tokens.push(Token::GreaterThanEqual),
+                    "<=" => tokens.push(Token::LessThanEqual),
+                    "==" => tokens.push(Token::EqualTo),
+                    "!=" => tokens.push(Token::NotEqualTo),
+                    "<-" => tokens.push(Token::RedirectIn),
+                    "->" => tokens.push(Token::RedirectOut),
+                    ">>" => tokens.push(Token::RedirectOutAppend),
+                    "not" => tokens.push(Token::Not),
+                    "and" => tokens.push(Token::And),
+                    "or" => tokens.push(Token::Or),
+                    "if" => tokens.push(Token::If),
+                    "while" => tokens.push(Token::While),
+                    "function" => tokens.push(Token::Function),
+                    "for" => tokens.push(Token::For),
+                    "true" => tokens.push(Token::Bool(Bool::True)),
+                    "false" => tokens.push(Token::Bool(Bool::False)),
+                    _ if re.is_match(&word) => tokens.push(Token::Number(word.parse()?)),
+                    _ => tokens.push(Token::Identifier(word)),
+                }
+            }
+            x => panic!("unknown token: {:?}", x),
         }
     }
-    tokens.push(Token::new("EndOfFile", TokenType::EOF));
-    tokens
+    tokens.push(Token::Eof);
+    Ok(tokens)
 }
