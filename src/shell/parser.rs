@@ -118,7 +118,24 @@ impl Parser {
                 self.expect(Token::CloseParen, "Expected ')' after expression");
                 expr
             }
-            Token::OpenBrace => todo!(),
+            Token::OpenBrace => {
+                let mut expression = Vec::new();
+                self.eat();
+                if *self.at() == Token::Newline {
+                    self.eat();
+                }
+
+                while *self.at() != Token::CloseBrace {
+                    let expr = self.parse_expression(Precedence::Lowest);
+                    expression.push(expr);
+
+                    if *self.at() == Token::Newline {
+                        self.eat();
+                    }
+                }
+                self.expect(Token::CloseBrace, "Expected closing brace");
+                Expr::Block(expression)
+            }
             Token::OpenBracket => todo!(),
             Token::Not => {
                 self.eat();
