@@ -1,5 +1,5 @@
 use super::ast::{Ast, BinaryOp, Expr, UnaryOp};
-use super::lexer::{Bool, Token, tokenize};
+use super::lexer::{Bool, Token};
 use super::values::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -10,13 +10,14 @@ pub enum Precedence {
     Assignment,  // =
     Pipe,        // |
     Redirect,    // ->, >>, <-
+    CommandArg,  // used for collecting args of a command call
     Or,          // or
     And,         // and
     Equality,    // ==, !=
     Comparison,  // <, <=, >, >=
     Term,        // +, -
     Factor,      // *, /, %
-    Unary,       // !, - (prefix)
+    Unary,       // !, not
     CallOrIndex, // function calls, array indexing: f(x), x[0]
     Primary,     // literals, identifiers, (grouped), blocks
 }
@@ -29,7 +30,8 @@ impl Precedence {
             AndThen => Assignment,
             Assignment => Pipe,
             Pipe => Redirect,
-            Redirect => Or,
+            Redirect => CommandArg,
+            CommandArg => Or,
             Or => And,
             And => Equality,
             Equality => Comparison,
@@ -42,16 +44,64 @@ impl Precedence {
         }
     }
 }
-
+macro_rules! match_literals {
+    ($x:pat) => {
+        Token::Number($x)
+            | Token::Bool($x)
+            | Token::String($x)
+            | Token::Identifier($x)
+            | Token::ShellWord($x)
+    };
+}
+macro_rules! match_keywords {
+    () => {
+        Token::If | Token::While | Token::Function | Token::For
+    };
+}
+macro_rules! match_shell_ops {
+    () => {
+        Token::AndThen
+            | Token::OrElse
+            | Token::Pipe
+            | Token::RedirectIn
+            | Token::RedirectOut
+            | Token::RedirectOutAppend
+    };
+}
+macro_rules! match_ops {
+    () => {
+        Token::Equals
+            | Token::Add
+            | Token::Sub
+            | Token::Mul
+            | Token::Div
+            | Token::Mod
+            | Token::And
+            | Token::Or
+            | Token::Not
+    };
+}
+macro_rules! match_open_groupers {
+    () => {
+        Token::OpenParen | Token::OpenBrace | Token::OpenBracket
+    };
+}
+macro_rules! match_close_groupers {
+    () => {
+        Token::CloseParen | Token::CloseBrace | Token::CloseBracket
+    };
+}
 pub struct Parser {
     tokens: Vec<Token>,
     current: usize,
 }
 
 impl Parser {
-    pub fn new(source_code: String) -> Self {
-        let tokens = tokenize(&source_code).unwrap();
-        Parser { tokens, current: 0 }
+    pub fn new() -> Self {
+        Parser {
+            tokens: Vec::new(),
+            current: 0,
+        }
     }
     fn at(&self) -> &Token {
         &self.tokens[self.current]
@@ -71,13 +121,43 @@ impl Parser {
         }
         prev
     }
-    fn check(&self, expected: Token) -> bool {
-        self.current < self.tokens.len() && self.tokens[self.current] == expected
-    }
-    pub fn produce_ast(&mut self) -> Ast {
-        Ast {
-            expr: self.parse_expression(Precedence::Lowest),
+    fn peek_next(&self) -> Option<&Token> {
+        if self.current + 2 < self.tokens.len() {
+            Some(&self.tokens[self.current + 1])
+        } else {
+            None
         }
+    }
+    fn peek_prev(&self) -> Option<&Token> {
+        if self.current > 0 {
+            Some(&self.tokens[self.current - 1])
+        } else {
+            None
+        }
+    }
+    fn is_arg(&self) -> bool {
+        matches!(self.at(), match_literals!(_))
+    }
+    pub fn produce_ast(&mut self, tokens: Vec<Token>) -> Ast {
+        self.tokens = tokens;
+        println!("{:#?}", self.tokens);
+        let ast = Ast {
+            expr: self.parse_expression(Precedence::Lowest),
+        };
+        self.tokens.clear();
+        self.current = 0;
+        ast
+    }
+    fn collect_args(&mut self, prec: Precedence) -> Vec<Expr> {
+        let mut args = Vec::new();
+        self.eat();
+        while self.is_arg() {
+            if self.get_precedence() < prec {
+                break;
+            }
+            args.push(self.parse_expression(prec));
+        }
+        args
     }
     fn parse_expression(&mut self, precedence: Precedence) -> Expr {
         let mut left = self.nud();
@@ -105,8 +185,69 @@ impl Parser {
                 }))
             }
             Token::Identifier(x) => {
-                self.eat();
-                Expr::Identifier(x.to_string())
+                if let Some(match_literals!(_)) = self.peek_next() {
+                    if let Some(prev) = self.peek_prev() {
+                        match prev {
+                            Token::Newline
+                            | match_shell_ops!()
+                            | match_keywords!()
+                            | match_open_groupers!()
+                            | Token::Comma => {
+                                let args = self.collect_args(Precedence::CommandArg);
+
+                                Expr::CommandCall {
+                                    command: Box::new(Expr::Identifier(x)),
+                                    args,
+                                }
+                            }
+                            _ => {
+                                self.eat();
+                                Expr::Identifier(x)
+                            }
+                        }
+                    } else {
+                        let args = self.collect_args(Precedence::CommandArg);
+                        Expr::CommandCall {
+                            command: Box::new(Expr::Identifier(x)),
+                            args,
+                        }
+                    }
+                } else {
+                    self.eat();
+                    Expr::Identifier(x)
+                }
+            }
+            Token::ShellWord(x) => {
+                if let Some(match_literals!(_)) = self.peek_next() {
+                    if let Some(prev) = self.peek_prev() {
+                        match prev {
+                            Token::Newline
+                            | match_shell_ops!()
+                            | match_keywords!()
+                            | match_open_groupers!()
+                            | Token::Comma => {
+                                let args = self.collect_args(Precedence::CommandArg);
+                                Expr::CommandCall {
+                                    command: Box::new(Expr::ShellWord(x)),
+                                    args,
+                                }
+                            }
+                            _ => {
+                                self.eat();
+                                Expr::ShellWord(x)
+                            }
+                        }
+                    } else {
+                        let args = self.collect_args(Precedence::CommandArg);
+                        Expr::CommandCall {
+                            command: Box::new(Expr::ShellWord(x)),
+                            args,
+                        }
+                    }
+                } else {
+                    self.eat();
+                    Expr::ShellWord(x)
+                }
             }
             Token::Function => todo!(),
             Token::If => todo!(),
@@ -248,6 +389,8 @@ impl Parser {
             Token::Pipe => Pipe,
 
             Token::RedirectIn | Token::RedirectOut | Token::RedirectOutAppend => Redirect,
+
+            match_literals!(_) => CommandArg,
 
             Token::Or => Or,
             Token::And => And,

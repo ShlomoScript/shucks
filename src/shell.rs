@@ -1,5 +1,6 @@
 use ast::Ast;
 use environment::ShellEnv;
+use lexer::Lexer;
 use parser::Parser;
 use std::io::{self, Write};
 
@@ -11,13 +12,15 @@ mod values;
 
 pub struct Shell {
     env: ShellEnv,
-    parser: Option<Parser>,
+    parser: Parser,
+    lexer: Lexer,
 }
 impl Shell {
     pub fn new() -> Self {
         Shell {
             env: ShellEnv::new(),
-            parser: None,
+            parser: Parser::new(),
+            lexer: Lexer::new(),
         }
     }
     pub fn start(&mut self) {
@@ -40,19 +43,17 @@ impl Shell {
                 if buffer.trim() == "exit" {
                     break;
                 }
-                if buffer.is_empty() {
+                if buffer.trim().is_empty() {
                     continue;
                 }
-                println!("{buffer}");
-                self.parser = Some(Parser::new(buffer.clone()));
-                println!("{:#?}", self.parse());
-                //println!("{:#?}", lexer::tokenize(&buffer).unwrap());
+                println!("{:#?}", self.parse(buffer.trim()));
                 buffer.clear();
             }
         }
     }
-    fn parse(&mut self) -> Ast {
-        self.parser.take().unwrap().produce_ast()
+    fn parse(&mut self, source_code: &str) -> Ast {
+        self.parser
+            .produce_ast(self.lexer.tokenize(source_code).unwrap())
     }
 }
 fn valid_delimiters(input: &str) -> bool {
@@ -76,7 +77,7 @@ fn valid_delimiters(input: &str) -> bool {
                     return false;
                 }
             }
-            _ => {} // ignore other characters
+            _ => {}
         }
     }
 
